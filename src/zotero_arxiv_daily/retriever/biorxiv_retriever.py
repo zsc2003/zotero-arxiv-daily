@@ -15,22 +15,58 @@ class BiorxivRetriever(BaseRetriever):
             raise ValueError(f"category must be specified for {self.name}")
 
     def _retrieve_raw_papers(self) -> list[dict[str, Any]]:
-        api_url = f"https://api.biorxiv.org/details/{self.server}/2d"
+        api_url = f"https://api.biorxiv.org/details/{self.server}/2d/0/json"
+    
         retry_num = 10
         delay_time = 10
+    
         for i in range(retry_num):
             try:
-                response = requests.get(api_url)
+                response = requests.get(
+                    api_url,
+                    timeout=30,
+                    headers={
+                        "Accept": "application/json",
+                    },
+                )
                 response.raise_for_status()
+    
+                # JSON 解析必须放进 retry 里面
+                result = response.json()
+    
+                # 确认返回的数据结构确实是 bioRxiv API 的正常结构
+                if not isinstance(result, dict) or "collection" not in result:
+                    raise ValueError(
+                        f"Invalid bioRxiv API response: {str(result)[:300]}"
+                    )
+    
                 break
+    
             except Exception as e:
+                logger.warning(
+                    f"Failed to retrieve bioRxiv papers "
+                    f"({i + 1}/{retry_num}): {e}"
+                )
+    
+                # 输出响应信息，方便下次直接判断 bioRxiv 返回了什么
+                if "response" in locals():
+                    logger.warning(
+                        f"bioRxiv response: status={response.status_code}, "
+                        f"content-type={response.headers.get('content-type')}, "
+                        f"body={response.text[:300]!r}"
+                    )
+    
                 if i == retry_num - 1:
-                    raise e
-                else:
-                    logger.warning(f"Failed to retrieve papers: {str(e)}. Retry in {delay_time} seconds.")
-                    sleep(delay_time)
-        result = response.json()
-        collection = result['collection']
+                    logger.error(
+                        "bioRxiv retrieval failed after "
+                        f"{retry_num} attempts. Skipping bioRxiv."
+                    )
+                    return []
+    
+                sleep(delay_time)
+    
+        collection = result["collection"]
+
         if len(collection) == 0:
             logger.warning(f"No paper found. API Message: {result['messages']}")
             return []
