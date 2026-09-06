@@ -130,18 +130,19 @@ def make_stub_zotero_client(collections=None, items=None):
 
 
 def make_stub_smtp(sent_emails: list):
-    """Return a class that records calls to sendmail().
-
-    Usage:
-        sent = []
-        monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
-        ...
-        assert len(sent) == 1
-        sender, recipients, body = sent[0]
-    """
+    """Return a class that records calls to sendmail()."""
 
     class StubSMTP:
         def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        def ehlo(self):
             pass
 
         def starttls(self):
@@ -157,6 +158,7 @@ def make_stub_smtp(sent_emails: list):
             pass
 
     return StubSMTP
+
 
 
 # ---------------------------------------------------------------------------
