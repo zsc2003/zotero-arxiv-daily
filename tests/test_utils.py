@@ -9,6 +9,7 @@ import pytest
 from zotero_arxiv_daily.utils import glob_match, send_email, extract_tex_code_from_tar, _bm25_pick
 from tests.canned_responses import make_stub_smtp
 
+from omegaconf import open_dict
 
 # ---------------------------------------------------------------------------
 # glob_match — migrated from test_glob_match.py
@@ -121,69 +122,52 @@ class TestGlobMatch:
 # ---------------------------------------------------------------------------
 
 
-def test_send_email_starttls_success(config, monkeypatch):
+def test_send_email_465_uses_ssl(config, monkeypatch):
     sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
-    send_email(config, "<html>hello</html>")
+
+    with open_dict(config.email):
+        config.email.smtp_port = 465
+
+    StubSSL = make_stub_smtp(sent)
+
+    class UnexpectedSMTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP must not be used for port 465")
+
+    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSSL)
+    monkeypatch.setattr(smtplib, "SMTP", UnexpectedSMTP)
+
+    send_email(config, "<html>SSL test</html>")
+
     assert len(sent) == 1
     sender, recipients, body = sent[0]
     assert sender == "test@example.com"
     assert recipients == ["test@example.com"]
-    # Body is a full MIME message (base64-encoded). Check the raw MIME string.
     assert "text/html" in body
 
 
-def test_send_email_falls_back_to_ssl(config, monkeypatch):
+def test_send_email_587_uses_starttls(config, monkeypatch):
     sent = []
-    call_count = {"smtp": 0}
 
-    StubOK = make_stub_smtp(sent)
+    with open_dict(config.email):
+        config.email.smtp_port = 587
 
-    class StubSMTP_TLS_Fails:
-        def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-        def starttls(self):
-            raise OSError("TLS not supported")
+    StubSMTP = make_stub_smtp(sent)
 
-    class StubSMTP_SSL(StubOK):
-        pass
+    class UnexpectedSSL:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP_SSL must not be used for port 587")
 
-    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL)
-    send_email(config, "<html>ssl</html>")
+    monkeypatch.setattr(smtplib, "SMTP", StubSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", UnexpectedSSL)
+
+    send_email(config, "<html>STARTTLS test</html>")
+
     assert len(sent) == 1
-
-
-def test_send_email_falls_back_to_plain(config, monkeypatch):
-    sent = []
-    call_count = {"smtp": 0}
-
-    StubOK = make_stub_smtp(sent)
-
-    class StubSMTP_TLS_Fails:
-        def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-            if call_count["smtp"] == 1:
-                pass  # first SMTP() call succeeds, but starttls will fail
-            else:
-                pass  # third SMTP() call is the plain fallback
-        def starttls(self):
-            raise OSError("TLS not supported")
-        def login(self, u, p):
-            pass
-        def sendmail(self, s, r, m):
-            sent.append((s, r, m))
-        def quit(self):
-            pass
-
-    class StubSMTP_SSL_Fails:
-        def __init__(self, *a, **kw):
-            raise OSError("SSL not supported")
-
-    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL_Fails)
-    send_email(config, "<html>plain</html>")
-    assert len(sent) == 1
+    sender, recipients, body = sent[0]
+    assert sender == "test@example.com"
+    assert recipients == ["test@example.com"]
+    assert "text/html" in body
 
 
 # ---------------------------------------------------------------------------
