@@ -3,7 +3,7 @@ name: Send emails daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * *'
+    - cron: '17 22 * * *'
 
 permissions:
   contents: read
